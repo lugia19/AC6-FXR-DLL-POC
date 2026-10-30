@@ -10,7 +10,7 @@ file, the network), driving any color, size, speed or state switch in an effect.
 
 1. Download the prebuilt zip from the [Releases](../../releases) page and extract it anywhere.
 2. Launch `hex-thrusters.me3` with [me3](https://github.com/garyttierney/me3) (ModEngine 3). It loads `mod/` and
-   `hex_thrusters.dll`. Don't play online with mods.
+   `hex_thrusters.dll`.
 3. Equip the **IB-C03G: NGI 000** generator.
 4. In game: **F8**, then **6 hex digits** (0-9 on the top row or numpad, A-F). The color applies after the 6th
    digit. Backspace deletes, Esc or F8 again cancels, 10 s without input cancels. Default: `#FF3030`.
