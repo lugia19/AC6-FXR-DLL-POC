@@ -23,17 +23,61 @@ their stock flames.
 
 ## How it works
 
-### External values
+### Custom external values
 
 FXR modifiers and state conditions can read **external values**: numbered floats the game supplies to an effect.
-The code that spawns an effect provides them, and an effect only gets the IDs its FXR header declares (anything
-else reads as 0). Every read goes through one function, `0x142b56480` in 1.09.1:
-`float *get(value_block, float *out, int id)`. Details:
+Normally the code that spawns an effect provides them. An effect gets a slot for every ID its FXR header declares,
+initialized to 0, and every read goes through one function. Background:
 [AC6-FXR-External-values-research](https://github.com/lugia19/AC6-FXR-External-values-research).
 
-So an FXR can declare an ID the game never uses (here **900001/900002/900003** for red/green/blue), and a DLL
-hooking that function can answer it. The DLL here only answers those three IDs and leaves every other read to the
-game.
+A custom value takes two parts:
+
+**1. The FXR reads an ID the game never uses.** Pick a reserved range (the game's own IDs stop at 70200; this
+POC uses 900001-900003) and read it in a modifier or a state condition. With
+[@cccode/fxr](https://github.com/EvenTorset/fxr), the ID ends up in the header's declaration list automatically:
+
+```js
+// Scales a property with value 900001: 0 -> x0, 1 -> x1 (linear, clamped).
+prop.modifiers.push(new ExternalValue1Modifier(900001, new LinearProperty(false, [
+  new Keyframe(0, 0), new Keyframe(1, 1),
+])))
+// Or switch states: State.from('ext(900001) >= 1 then 1')
+```
+
+Use `ExternalValue1Modifier`: it's evaluated live. `ExternalValue2` values are only read when the effect is
+created.
+
+**2. The DLL answers it.** Effects read values through `0x142b56480` (1.09.1), effectively
+`float *get(value_block, float *out, int id)`: it looks `id` up in the effect's value block and writes the value,
+or 0 if nobody provides it. The DLL detours that function, lets the game's lookup run, then overwrites the result
+for its own IDs only:
+
+```rust
+unsafe extern "system" fn get_impl(block: *mut u8, out: *mut u32, id: i32) -> *mut u32 {
+    let result = orig(block, out, id);      // the game's lookup, unchanged for every other ID
+    if (900001..=900003).contains(&id) {
+        *out = my_value(id).to_bits();      // the float, written as raw bits
+    }
+    result
+}
+```
+
+The rest of `dll/src/lib.rs` is setup and this mod's input:
+
+- **Hooking:** a `retour::RawDetour` on the function; the trampoline is the `orig` above. Before hooking, the DLL
+  checks the function's first bytes (`44 89 44 24 18`, `mov [rsp+18],r8d`) and does nothing if they don't match,
+  e.g. on another game version. It installs the hook in `DllMain` when me3 loads it as a native.
+- **The value source has to be cheap and thread-safe.** The function is called for every external value read by
+  every effect, many times per frame and from effect update threads. Here the color lives in an `AtomicU32`, set
+  by a keyboard polling thread.
+- **Values are global:** the hook gets the effect's value block, not the effect, so every effect reading 900001
+  gets the same value. Per-effect values would mean mapping blocks to effects (the research repo's logger does
+  this by hooking the attach function).
+- **0 means "no value".** Without the DLL every custom ID reads as 0, so an effect should look sensible at 0.
+  This POC serves `channel / 255 + 1` and its curves map 0 to white, so without the DLL the flames are white
+  instead of black.
+- **Porting to another game version:** find the function again (byte pattern of its body, or via its callers in
+  the modifier evaluators) and update the address.
 
 ### The mod
 
@@ -47,10 +91,8 @@ game.
   color, since a particle's color is the product of its appearance colors and that one. (Tinting every color
   property applies the tint several times and turns most colors black.) Lights and lens flare layers are tinted
   directly; distortion is left alone.
-- **DLL** (`dll/`, Rust): hooks the read function, answers 900001-900003 with `channel / 255 + 1`, and reads the
-  keyboard while the game window is focused. The `+1` keeps 0 meaning "no value": the tint curves map 0 to white,
-  so without the DLL the flames are white instead of black. The DLL checks the function's first bytes and does
-  nothing on other game versions.
+- **DLL** (`dll/`, Rust): the hook above for 900001-900003 (red, green, blue), plus a thread that polls the
+  keyboard (`GetAsyncKeyState`) while the game window is focused and stores the typed color.
 
 ## Build
 
