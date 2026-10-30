@@ -1,0 +1,13 @@
+profileVersion = "v1"
+
+# me3 profile for the prebuilt mod: keep it next to the mod folder and hex_thrusters.dll.
+
+[[supports]]
+game = "armoredcore6"
+
+[[packages]]
+id = "hex-thrusters"
+path = 'mod'
+
+[[natives]]
+path = 'hex_thrusters.dll'
