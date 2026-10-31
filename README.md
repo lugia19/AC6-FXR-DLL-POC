@@ -62,6 +62,35 @@ unsafe extern "system" fn get_impl(block: *mut u8, out: *mut u32, id: i32) -> *m
 }
 ```
 
+What the game's function does (Ghidra decompile of `0x142b56480`, cleaned up):
+
+```cpp
+struct ValueBlock {     // one per effect instance, 0x20 bytes
+    void*  unknown;     // +0x00
+    int*   ids;         // +0x08  external value IDs, sorted ascending
+    float* values;      // +0x10  values[i] belongs to ids[i]
+    uint32 count;       // +0x18
+};
+
+float* get(ValueBlock* block, float* out, int id) {
+    float result = 0.0f;                                // the default for IDs the block doesn't have
+    int* end = block->ids + block->count;
+    int* it = std::lower_bound(block->ids, end, id);    // binary search
+    if (it != end && *it == id) {
+        result = block->values[it - block->ids];
+    }
+    *out = result;
+    return out;                                         // the pointer it was given, not the value
+}
+```
+
+That's all it does: a lookup in two parallel arrays. The game fills an effect's block when the effect is spawned
+or updated (the spawner sets its values, which get copied into the instance's block), and every modifier or state
+condition that reads an external value calls this with the effect's block and the ID from the FXR. Since the
+lookup has no side effects, a hook can also skip it for its own IDs: write the value to `*out` and return `out`.
+(The real function also fills its stack frame with `0xCCCCCCCC` and calls `_RTC_CheckStackVars`, MSVC's runtime
+stack checks, normally only seen in debug builds. They don't affect the result.)
+
 The rest of `dll/src/lib.rs` is setup and this mod's input:
 
 - **Hooking:** a `retour::RawDetour` on the function; the trampoline is the `orig` above. Before hooking, the DLL
